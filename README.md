@@ -7,7 +7,7 @@ sdk: docker
 app_port: 8000
 pinned: false
 license: apache-2.0
-short_description: OpenEnv environment for SQL query repair tasks with a live frontend
+short_description: OpenEnv SQL repair tasks with a live frontend
 ---
 
 # SQL Repair OpenEnv
