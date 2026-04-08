@@ -15,9 +15,15 @@ SCORE_MAX: float = 0.999  # strictly < 1
 
 
 def strict_clamp(value: Any) -> float:
-    """Coerce any input into a float strictly inside (0, 1).
+    """Coerce any input into a float strictly inside the OPEN interval (0, 1).
 
     NaN, inf, -inf, and non-numeric inputs all collapse to 0.5.
+
+    Two hard invariants from Canary's Phase 2 failures:
+      1. Never emit exactly 0.0 or 1.0 (validator rejects endpoints).
+      2. After rounding for display (.4f), the value must STILL be strictly
+         inside (0, 1). A tiny raw value like 0.00004 would round to 0.0000
+         and trip the validator, so we floor to SCORE_MIN in that case.
     """
     try:
         s = float(value)
@@ -29,7 +35,12 @@ def strict_clamp(value: Any) -> float:
         return SCORE_MIN
     if s >= 1.0:
         return SCORE_MAX
-    return round(s, 4)
+    rounded = round(s, 4)
+    if rounded <= 0.0:
+        return SCORE_MIN
+    if rounded >= 1.0:
+        return SCORE_MAX
+    return rounded
 
 
 def grade_task(state, task_id: str) -> float:

@@ -29,6 +29,49 @@ import time
 import traceback
 from typing import Any, Dict, List, Optional
 
+
+# ===========================================================================
+# Sterile stdout wrapper — installed BEFORE any library imports that might
+# write to stdout. Only lines beginning with [START] / [STEP] / [END] are
+# passed through to the real stdout; everything else is silently dropped
+# (stray library prints cannot leak a float outside (0, 1) and trip the
+# validator's parser). See Canary findings #11 / #12.
+# ===========================================================================
+class _SterileStdout:
+    _ALLOWED_PREFIXES = ("[START]", "[STEP]", "[END]")
+
+    def __init__(self, real) -> None:
+        self._real = real
+        self._buffer = ""
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+        self._buffer += s
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            stripped = line.lstrip()
+            if any(stripped.startswith(p) for p in self._ALLOWED_PREFIXES):
+                self._real.write(line + "\n")
+        return len(s)
+
+    def flush(self) -> None:
+        try:
+            self._real.flush()
+        except Exception:
+            pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+_REAL_STDOUT = sys.stdout
+sys.stdout = _SterileStdout(_REAL_STDOUT)  # type: ignore[assignment]
+
+
 # ===========================================================================
 # Standardized OpenEnv environment variables (REQUIRED by submission checklist)
 # ===========================================================================
@@ -61,7 +104,19 @@ def warn(msg: str) -> None:
 # Strict (0, 1) score clamp — duplicated here so the agent never depends on
 # importable env code (the validator may run inference.py outside the package).
 # ===========================================================================
+_SCORE_MIN = 0.001  # strictly > 0
+_SCORE_MAX = 0.999  # strictly < 1
+
+
 def clamp_score(value: Any) -> float:
+    """Coerce any input into a float strictly inside the OPEN interval (0, 1).
+
+    Two hard invariants from Canary's Phase 2 failures:
+      1. Never emit 0.0 or 1.0 (validator rejects endpoints).
+      2. After rounding for display (.4f), the value must STILL be in (0, 1).
+         0.0001 rounds to 0.0001 (OK) but 0.00004 rounds to 0.0000 (FAIL),
+         so we floor to _SCORE_MIN when that happens.
+    """
     try:
         s = float(value)
     except (TypeError, ValueError):
@@ -71,10 +126,15 @@ def clamp_score(value: Any) -> float:
     if s == float("inf") or s == float("-inf"):
         return 0.5
     if s <= 0.0:
-        return 0.001
+        return _SCORE_MIN
     if s >= 1.0:
-        return 0.999
-    return round(s, 4)
+        return _SCORE_MAX
+    rounded = round(s, 4)
+    if rounded <= 0.0:
+        return _SCORE_MIN
+    if rounded >= 1.0:
+        return _SCORE_MAX
+    return rounded
 
 
 # ===========================================================================
@@ -317,22 +377,27 @@ def run_task(env: HttpEnvClient, llm_client, task_id: str) -> float:
                 result = env.step({"action_type": "submit_query", "query": fixed})
             except Exception as exc:  # noqa: BLE001
                 warn(f"env.step failed on step {step_idx}: {exc}")
-                emit(
-                    f"[STEP] {step_idx:02d} | task={task_id} "
-                    f"| action=submit_query | reward=+0.0000 | status=step_error"
-                )
+                # Bracket-line output MUST NOT contain any floating-point
+                # number except `score=` in [END]. See Canary #11/#12
+                # findings: the validator's parser scans all stdout floats
+                # and rejects any outside the open interval (0, 1).
+                emit(f"[STEP] task={task_id} action=submit_query result=step_error")
                 continue
 
-            reward = float(result.get("reward", 0.0))
             obs2: Dict[str, Any] = result.get("observation", {}) or {}
             done = bool(result.get("done", False))
             matches = bool(obs2.get("matches_expected", False))
+            executed = bool(obs2.get("executed", False))
+            if matches:
+                step_result = "solved"
+            elif executed:
+                step_result = "wrong_rows"
+            else:
+                step_result = "error"
 
-            emit(
-                f"[STEP] {step_idx:02d} | task={task_id} "
-                f"| action=submit_query | reward={reward:+.4f} "
-                f"| matches={matches} | rows={obs2.get('result_row_count', 0)}"
-            )
+            # Zero floats on this line. Zero integers either — Canary #13
+            # goes ultra-minimal and we follow suit. Only text tokens.
+            emit(f"[STEP] task={task_id} action=submit_query result={step_result}")
 
             previous_attempts.append(
                 {

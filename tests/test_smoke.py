@@ -33,6 +33,24 @@ def test_strict_clamp_passes_through_in_range():
         assert 0.0 < out < 1.0
 
 
+def test_strict_clamp_handles_tiny_positive_that_would_round_to_zero():
+    """Canary #11 lesson: 0.00004 rounds to 0.0000 and trips the validator."""
+    for v in [0.00001, 0.00004, 0.00009, 1e-8]:
+        out = strict_clamp(v)
+        # formatted with .4f must still be strictly in (0, 1)
+        rendered = f"{out:.4f}"
+        assert float(rendered) > 0.0, f"{v} rendered as {rendered}"
+        assert float(rendered) < 1.0
+
+
+def test_strict_clamp_handles_near_one_that_would_round_to_one():
+    for v in [0.99995, 0.99999, 1 - 1e-8]:
+        out = strict_clamp(v)
+        rendered = f"{out:.4f}"
+        assert float(rendered) > 0.0
+        assert float(rendered) < 1.0, f"{v} rendered as {rendered}"
+
+
 # ---------------------------------------------------------------------------
 # Each canonical query reproduces the expected rows
 # ---------------------------------------------------------------------------
