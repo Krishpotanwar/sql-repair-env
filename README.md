@@ -4,6 +4,7 @@ emoji: 📊
 colorFrom: red
 colorTo: purple
 sdk: docker
+app_port: 8000
 pinned: false
 license: apache-2.0
 short_description: OpenEnv environment for SQL query repair tasks (Scaler × Met
