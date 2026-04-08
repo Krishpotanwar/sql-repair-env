@@ -1,3 +1,14 @@
+---
+title: Sql Repair Env
+emoji: 📊
+colorFrom: red
+colorTo: purple
+sdk: docker
+pinned: false
+license: apache-2.0
+short_description: OpenEnv environment for SQL query repair tasks (Scaler × Met
+---
+
 # SQL Repair OpenEnv
 
 An OpenEnv environment for the **Meta PyTorch x Scaler hackathon** where
