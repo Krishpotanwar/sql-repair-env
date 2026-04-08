@@ -8,7 +8,6 @@ __pycache__
 .ruff_cache
 .mypy_cache
 frontend/node_modules
-frontend/dist
 tests/
 *.egg-info
 build/

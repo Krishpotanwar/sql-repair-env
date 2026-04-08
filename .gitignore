@@ -18,4 +18,5 @@ dist/
 .claude-flow/
 .swarm/
 .claude/
-
+!frontend/dist/
+!frontend/dist/**
