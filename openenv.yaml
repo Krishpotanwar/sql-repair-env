@@ -1,0 +1,28 @@
+name: sql-repair-env
+version: 0.1.0
+description: |
+  OpenEnv environment for SQL query repair. Each task gives the agent a
+  schema, a broken SQL query, and a hint. The agent must submit a corrected
+  query that returns the expected result set. Backed by SQLite in-memory.
+maintainer: krishpotanwar
+runtime:
+  type: docker
+  image: sql-repair-env:latest
+  port: 8000
+endpoints:
+  health: /health
+  tasks: /tasks
+  reset: /reset
+  step: /step
+  grader: /grader
+  baseline: /baseline
+tasks:
+  - id: task_1
+    name: Missing commas in SELECT
+    difficulty: easy
+  - id: task_2
+    name: Wrong column reference in JOIN
+    difficulty: medium
+  - id: task_3
+    name: Aggregate without GROUP BY
+    difficulty: hard
