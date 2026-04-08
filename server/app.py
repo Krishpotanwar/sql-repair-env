@@ -18,7 +18,9 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from sql_env.env_core import EnvState, MAX_STEPS
@@ -36,6 +38,8 @@ app = FastAPI(
 
 # Single mutable env state instance — the validator runs one session.
 _state = EnvState()
+_server_dir = os.path.dirname(os.path.abspath(__file__))
+_frontend_dist = os.path.abspath(os.path.join(_server_dir, "..", "frontend", "dist"))
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +74,11 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/health")
+def health_api() -> Dict[str, str]:
+    return health()
+
+
 @app.get("/tasks")
 def list_tasks() -> Dict[str, Any]:
     return {
@@ -85,12 +94,22 @@ def list_tasks() -> Dict[str, Any]:
     }
 
 
+@app.get("/api/tasks")
+def list_tasks_api() -> Dict[str, Any]:
+    return list_tasks()
+
+
 @app.post("/reset")
 def reset(req: Optional[ResetRequest] = Body(default=None)) -> Dict[str, Any]:
     """Reset the environment. Body is optional — defaults to task_1."""
     task_id = req.task_id if (req and req.task_id) else "task_1"
     obs = _state.reset(task_id)
     return obs
+
+
+@app.post("/api/reset")
+def reset_api(req: Optional[ResetRequest] = Body(default=None)) -> Dict[str, Any]:
+    return reset(req)
 
 
 @app.post("/step")
@@ -100,12 +119,22 @@ def step(req: Optional[StepRequest] = Body(default=None)) -> Dict[str, Any]:
     return _state.step(action)
 
 
+@app.post("/api/step")
+def step_api(req: Optional[StepRequest] = Body(default=None)) -> Dict[str, Any]:
+    return step(req)
+
+
 @app.post("/grader")
 def grader(req: Optional[GraderRequest] = Body(default=None)) -> Dict[str, Any]:
     """Return the strict-(0,1) score for the given task."""
     task_id = req.task_id if (req and req.task_id) else (_state.task_id or "task_1")
     score = grade_task(_state, task_id)
     return {"task_id": task_id, "score": float(score)}
+
+
+@app.post("/api/grader")
+def grader_api(req: Optional[GraderRequest] = Body(default=None)) -> Dict[str, Any]:
+    return grader(req)
 
 
 @app.post("/baseline")
@@ -124,6 +153,48 @@ def baseline(
         local.step({"action_type": "submit_query", "query": TASKS[tid]["broken_query"]})
         out[tid] = float(grade_task(local, tid))
     return {"scores": out, "max_steps": MAX_STEPS}
+
+
+@app.post("/api/baseline")
+def baseline_api(
+    req: Optional[BaselineRequest] = Body(default=None),
+) -> Dict[str, Any]:
+    return baseline(req)
+
+
+@app.get("/", include_in_schema=False, response_model=None)
+def root() -> Any:
+    index_file = os.path.join(_frontend_dist, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {
+        "name": "SQL Repair OpenEnv",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/health",
+        "tasks": "/tasks",
+    }
+
+
+if os.path.isdir(_frontend_dist):
+    assets_dir = os.path.join(_frontend_dist, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        requested_file = os.path.join(_frontend_dist, full_path)
+        if os.path.isfile(requested_file):
+            return FileResponse(requested_file)
+
+        index_file = os.path.join(_frontend_dist, "index.html")
+        if os.path.isfile(index_file):
+            return FileResponse(index_file)
+
+        raise HTTPException(status_code=404, detail="Not Found")
 
 
 # ---------------------------------------------------------------------------
